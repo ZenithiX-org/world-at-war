@@ -1,0 +1,335 @@
+<html><head><base href="https://worldconquestsimulator.com/">
+<title>World Conquest Simulator</title>
+<style>
+  body, html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: 'Roboto', Arial, sans-serif;
+    background-color: #2c3e50;
+    color: #ecf0f1;
+  }
+  #map-container {
+    width: 100%;
+    height: 70vh;
+    background-color: #34495e;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+  #controls {
+    padding: 20px;
+    background-color: #2c3e50;
+  }
+  .country {
+    fill: #7f8c8d;
+    stroke: #2c3e50;
+    stroke-width: 0.5;
+    transition: fill 0.3s;
+  }
+  .country:hover {
+    fill: #e74c3c;
+    cursor: pointer;
+  }
+  .selected {
+    fill: #c0392b !important;
+  }
+  .attacked {
+    fill: #e74c3c !important;
+  }
+  .own-country {
+    fill: #27ae60 !important;
+  }
+  .conquered {
+    fill: #2ecc71 !important;
+  }
+  #country-select {
+    margin-right: 10px;
+    padding: 8px;
+    border: none;
+    border-radius: 4px;
+    background-color: #34495e;
+    color: #ecf0f1;
+    font-size: 14px;
+  }
+  #resources {
+    margin-top: 15px;
+    font-weight: bold;
+    background-color: #34495e;
+    padding: 10px;
+    border-radius: 4px;
+    display: inline-block;
+  }
+  #action-buttons {
+    margin-top: 15px;
+  }
+  button {
+    margin-right: 10px;
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.3s, transform 0.1s;
+  }
+  button:hover {
+    transform: translateY(-2px);
+  }
+  button:active {
+    transform: translateY(0);
+  }
+  #attack-btn {
+    background-color: #e74c3c;
+    color: #fff;
+  }
+  #attack-btn:hover {
+    background-color: #c0392b;
+  }
+  #recruit-btn {
+    background-color: #3498db;
+    color: #fff;
+  }
+  #recruit-btn:hover {
+    background-color: #2980b9;
+  }
+  #zoom-controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(52, 73, 94, 0.8);
+    border-radius: 4px;
+    padding: 5px;
+  }
+  #zoom-controls button {
+    background-color: #2c3e50;
+    color: #ecf0f1;
+    margin: 0 2px;
+  }
+  #zoom-controls button:hover {
+    background-color: #34495e;
+  }
+  #country-info {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(52, 73, 94, 0.9);
+    border-radius: 4px;
+    padding: 15px;
+    display: none;
+    font-size: 14px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+  #status {
+    display: block;
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #34495e;
+    border-radius: 4px;
+    font-style: italic;
+  }
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://d3js.org/topojson.v3.min.js"></script>
+</head>
+<body>
+<div id="map-container">
+  <div id="zoom-controls">
+    <button id="zoom-in">+</button>
+    <button id="zoom-out">-</button>
+    <button id="reset-zoom">Reset</button>
+  </div>
+  <div id="country-info"></div>
+</div>
+<div id="controls">
+  <select id="country-select">
+    <option value="">Choose your country</option>
+  </select>
+  <button id="attack-btn" disabled>Attack Selected Country</button>
+  <div id="resources">
+    Money: $<span id="money">1000</span> | 
+    Troops: <span id="troops">100</span> |
+    Income: $<span id="income">1</span>/sec
+  </div>
+  <div id="action-buttons">
+    <button id="recruit-btn">Recruit Troops ($10 each)</button>
+  </div>
+  <span id="status"></span>
+</div>
+
+<script>
+const width = window.innerWidth;
+const height = window.innerHeight * 0.7;
+const svg = d3.select("#map-container")
+  .append("svg")
+  .attr("width", width)
+  .attr("height", height);
+
+const g = svg.append("g");
+
+const projection = d3.geoMercator()
+  .scale(width / 2 / Math.PI)
+  .translate([width / 2, height / 2]);
+
+const path = d3.geoPath().projection(projection);
+
+let selectedCountry = null;
+let ownCountry = null;
+let money = 1000;
+let troops = 100;
+let income = 1;
+let conqueredCountries = new Set();
+
+const zoom = d3.zoom()
+  .scaleExtent([1, 8])
+  .on("zoom", zoomed);
+
+svg.call(zoom);
+
+function zoomed(event) {
+  g.attr("transform", event.transform);
+}
+
+d3.select("#zoom-in").on("click", () => {
+  svg.transition().call(zoom.scaleBy, 2);
+});
+
+d3.select("#zoom-out").on("click", () => {
+  svg.transition().call(zoom.scaleBy, 0.5);
+});
+
+d3.select("#reset-zoom").on("click", () => {
+  svg.transition().call(zoom.transform, d3.zoomIdentity);
+});
+
+function updateResources() {
+  d3.select("#money").text(Math.floor(money));
+  d3.select("#troops").text(troops);
+  d3.select("#income").text(income);
+}
+
+function generateIncome() {
+  money += income;
+  updateResources();
+}
+
+setInterval(generateIncome, 1000);
+
+function getCountryPower(country) {
+  const area = path.area(country);
+  const normalizedArea = area / 100;
+  return Math.floor(normalizedArea * (Math.random() * 0.5 + 0.75)); // Power based on area with some randomness
+}
+
+d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(function(world) {
+  const countries = topojson.feature(world, world.objects.countries);
+
+  countries.features.forEach(country => {
+    country.properties.power = getCountryPower(country);
+  });
+
+  g.selectAll("path")
+    .data(countries.features)
+    .enter()
+    .append("path")
+    .attr("d", path)
+    .attr("class", "country")
+    .on("click", function(event, d) {
+      if (this === ownCountry) return;
+      if (selectedCountry === this) {
+        d3.select(this).classed("selected", false);
+        selectedCountry = null;
+        d3.select("#attack-btn").property("disabled", true);
+        d3.select("#country-info").style("display", "none");
+      } else {
+        if (selectedCountry) {
+          d3.select(selectedCountry).classed("selected", false);
+        }
+        d3.select(this).classed("selected", true);
+        selectedCountry = this;
+        d3.select("#attack-btn").property("disabled", false);
+        
+        // Show country info
+        const countryInfo = d3.select("#country-info");
+        countryInfo.style("display", "block")
+          .html(`<strong>${d.properties.name}</strong><br>
+                 Power: ${d.properties.power}<br>
+                 Your Troops: ${troops}`);
+      }
+    });
+
+  const countrySelect = d3.select("#country-select");
+  countrySelect
+    .selectAll("option")
+    .data(countries.features)
+    .enter()
+    .append("option")
+    .text(d => d.properties.name)
+    .attr("value", d => d.id);
+
+  countrySelect.on("change", function() {
+    const selectedId = this.value;
+    if (ownCountry) {
+      d3.select(ownCountry).classed("own-country", false);
+    }
+    ownCountry = g.selectAll("path").filter(d => d.id === selectedId).node();
+    d3.select(ownCountry).classed("own-country", true);
+    
+    if (selectedCountry === ownCountry) {
+      d3.select(selectedCountry).classed("selected", false);
+      selectedCountry = null;
+      d3.select("#attack-btn").property("disabled", true);
+      d3.select("#country-info").style("display", "none");
+    }
+  });
+
+  d3.select("#attack-btn").on("click", function() {
+    if (selectedCountry && troops > 0) {
+      const targetCountry = d3.select(selectedCountry).datum();
+      const targetPower = targetCountry.properties.power;
+      const attackPower = troops;
+      
+      const troopsLost = Math.floor(Math.random() * (troops / 2)) + 1;
+      troops -= troopsLost;
+      
+      const attackSuccess = attackPower > targetPower;
+      
+      if (attackSuccess) {
+        d3.select(selectedCountry).classed("conquered", true);
+        conqueredCountries.add(selectedCountry);
+        income += 1; // Increase income for each conquered country
+        d3.select("#status").text(`Successfully conquered ${targetCountry.properties.name}! Lost ${troopsLost} troops. Income increased!`);
+      } else {
+        d3.select(selectedCountry).classed("attacked", true);
+        d3.select("#status").text(`Failed to conquer ${targetCountry.properties.name}. Lost ${troopsLost} troops. The country was too powerful!`);
+      }
+      
+      updateResources();
+      setTimeout(() => {
+        d3.select(selectedCountry).classed("attacked", false).classed("selected", false);
+        selectedCountry = null;
+        d3.select("#attack-btn").property("disabled", true);
+        d3.select("#status").text("");
+        d3.select("#country-info").style("display", "none");
+      }, 2000);
+    } else if (troops === 0) {
+      d3.select("#status").text("Not enough troops to attack!");
+    }
+  });
+
+  d3.select("#recruit-btn").on("click", function() {
+    if (money >= 10) {
+      money -= 10;
+      troops += 1;
+      updateResources();
+      d3.select("#status").text("Recruited 1 troop for $10");
+    } else {
+      d3.select("#status").text("Not enough money to recruit troops!");
+    }
+  });
+});
+
+updateResources();
+</script>
+</body></html>
